@@ -1,0 +1,196 @@
+#!/usr/bin/env node
+
+/**
+ * Module dependencies.
+ */
+
+var app = require('../app');
+var debug = require('debug')('btrfs_server:server');
+var http = require('http');
+
+/**
+ * Get port from environment and store in Express.
+ */
+
+var port = normalizePort(process.env.PORT || '3000');
+app.set('port', port);
+
+/**
+ * Create HTTP server.
+ */
+
+var server = http.createServer(app);
+var io = require('socket.io')(server);
+
+/**
+ * Listen on provided port, on all network interfaces.
+ */
+
+server.listen(port);
+server.on('error', onError);
+server.on('listening', onListening);
+
+/**
+ * Normalize a port into a number, string, or false.
+ */
+
+function normalizePort(val) {
+  var port = parseInt(val, 10);
+
+  if (isNaN(port)) {
+    // named pipe
+    return val;
+  }
+
+  if (port >= 0) {
+    // port number
+    return port;
+  }
+
+  return false;
+}
+
+/**
+ * Event listener for HTTP server "error" event.
+ */
+
+function onError(error) {
+  if (error.syscall !== 'listen') {
+    throw error;
+  }
+
+  var bind = typeof port === 'string'
+    ? 'Pipe ' + port
+    : 'Port ' + port;
+
+  // handle specific listen errors with friendly messages
+  switch (error.code) {
+    case 'EACCES':
+      console.error(bind + ' requires elevated privileges');
+      process.exit(1);
+      break;
+    case 'EADDRINUSE':
+      console.error(bind + ' is already in use');
+      process.exit(1);
+      break;
+    default:
+      throw error;
+  }
+}
+
+/**
+ * Event listener for HTTP server "listening" event.
+ */
+
+function onListening() {
+  var addr = server.address();
+  var bind = typeof addr === 'string'
+    ? 'pipe ' + addr
+    : 'port ' + addr.port;
+  debug('Listening on ' + bind);
+}
+
+var crypto = require('crypto');
+var fileSystem = require('fs');
+var getStreams = require('../functions/streams');
+var net = require('net');
+
+
+var date;
+var streamDir;
+var stream;
+var hash;
+var sessionServer = net.createServer({exclusive: true}, function(socket) {
+    console.log('client connected to session');
+    // Clear logs for our web clients
+    io.sockets.emit('progress-clear');
+
+    var sessionDuration;
+    socket.pipe(socket);
+    socket.on('data', function(data) {
+
+        if (data.toString().search("log-event:") == 0) {
+            var logEvent = data.toString().substring("log-event:".length).trim();
+            console.log('log event received: ' + logEvent);
+            // pass it on to our web clients
+            io.sockets.emit('progress', logEvent);
+
+            socket.write('accepted log-event\n');
+        }
+        else if (data.toString().search("stream-start:") == 0) {
+            sessionDuration = process.hrtime();
+
+            date = data.toString().substring("stream-start:".length).trim();
+            console.log('stream date received: ' + date);
+            streamDir = "data/" + date + "/";
+            console.log('creating stream dir: ' + streamDir);
+            fileSystem.mkdirSync(streamDir, 0777);
+            console.log('creating stream file: ' + streamDir + "stream");
+            stream = fileSystem.createWriteStream(streamDir + "stream");
+            hash = crypto.createHash('sha1');
+
+            socket.write('accepted stream-start\n');
+        } else if (data.toString().search("stream-end:") == 0) {
+            var receivedHash = data.toString().substring("stream-end:".length).trim();
+            console.log('received hash: ' + receivedHash);
+            console.log('computed hash: ' + computedHash);
+
+            sessionDuration = process.hrtime(sessionDuration);
+            sessionDuration = ((sessionDuration[0] * 1000) + (sessionDuration[1] / 1000000)).toFixed(0);
+            console.log('session duration: ' + sessionDuration + ' ms');
+
+            var stats = fileSystem.createWriteStream(streamDir + "stats");
+            stats.write('{\n');
+            stats.write('"hash":"' + receivedHash + '",\n');
+            stats.write('"duration":' + sessionDuration + '\n');
+            stats.write('}\n');
+            stats.end();
+
+            socket.write('accepted stream-end\n');
+        } else {
+            console.error('unexpected data: ' + data);
+        }
+    });
+
+    socket.on('close', function() {
+        console.log('client closed session');
+        // emit a streams event for our web clients
+        setTimeout(function() {
+            io.sockets.emit('streams', getStreams());
+        }, 1000);
+    });
+
+    socket.on('error', function(error) {
+        console.error('client session error: ' + error);
+    });
+});
+
+var computedHash;
+var streamServer = net.createServer({exclusive: true}, function(socket) {
+    console.log('client connected to stream');
+
+    socket.on('data', function(data) {
+        if (stream != null) {
+            stream.write(data);
+            hash.update(data);
+        } else {
+            console.error('unexpected data: ' + data);
+        }
+    });
+
+    socket.on('close', function() {
+        if (stream != null) {
+            console.log('closing stream on disk');
+            stream.end();
+            stream = null;
+            computedHash = hash.digest('hex');
+        }
+    });
+
+    socket.on('error', function(error) {
+        console.error('stream error: ' + error);
+    });
+});
+
+sessionServer.listen(50027);
+streamServer.listen(50028);

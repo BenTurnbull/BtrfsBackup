@@ -1,0 +1,207 @@
+#!/usr/bin/env bash
+#
+# btrfsBackup client for sending back snapshots of specified btrfs mounts
+
+set -e # exit on error
+
+# Global variables
+readonly BASE="base"
+readonly NEW="new"
+readonly SESSION_PORT=50027
+readonly STREAM_PORT=50028
+#readonly DEV_PATH="~/Downloads/btrfs-progs-v4.2.3/"
+BACKUP_PATH="/"
+LOG="btrfs_client.log"
+
+backup() {
+  server_address="$1"
+  info "connecting to server on ${server_address}:${SESSION_PORT}"
+  exec 3<>/dev/tcp/${server_address}/${SESSION_PORT}
+  info "connected to server"
+
+  if [[ ! -e ${BACKUP_PATH} ]]; then
+    error "backup location does not exist: " ${BACKUP_PATH}
+    exit 1
+  fi
+
+  if [[ ! -e "${BACKUP_PATH}/${BASE}" ]]; then
+    # first backup
+    info "creating base snapshot"
+    btrfs subvolume snapshot -r "${BACKUP_PATH}" "${BACKUP_PATH}/${BASE}" &>> ${LOG}
+    sync &>> ${LOG}
+
+    send_stream
+  else
+    # incremental backup
+    info "creating new snapshot"
+    btrfs subvolume snapshot -r "${BACKUP_PATH}" "${BACKUP_PATH}/${NEW}" &>> ${LOG}
+    sync &>> ${LOG}
+
+    send_stream
+
+    info "deleting base snapshot"
+    btrfs subvolume delete "${BACKUP_PATH}/${BASE}" &>> ${LOG}
+
+    info "promoting new snapshot to base"
+    mv "${BACKUP_PATH}/${NEW}" "${BACKUP_PATH}/${BASE}" &>> ${LOG}
+  fi
+  info "backup process complete"
+
+  close
+
+  # backup cleanup
+  rm -f hashValue
+  rm -f btrfs_client
+  rm -f btrfs_client.log
+}
+
+send_stream() {
+    info "sending request to stream"
+    echo "stream-start:$(date +%Y-%m-%dT%H:%M:%S)" >&3
+    read -t 1 token <&3 || true
+    while [[ ${token} != *"accepted stream-start"* ]]
+    do
+        read -t 1 token <&3 || true
+    done
+    info "response from server: ${token}"
+
+    if [[ ! -e "${BACKUP_PATH}/${NEW}" ]]; then
+        info "sending base snapshot stream"
+        btrfs send "${BACKUP_PATH}/${BASE}" | tee >(sha1sum -b | awk '{ print $1 }' > hashValue ) | nc ${server_address} ${STREAM_PORT}
+    else
+        info "sending an incremental snapshot stream"
+        btrfs send -p "${BACKUP_PATH}/${BASE}" "${BACKUP_PATH}/${NEW}" | tee >(sha1sum -b | awk '{ print $1 }' > hashValue ) | nc ${server_address} ${STREAM_PORT}
+    fi
+
+    info "sending computed hash: $(<hashValue)"
+    echo "stream-end:$(<hashValue)" >&3
+    read -t 1 token <&3 || true
+    while [[ ${token} != *"accepted stream-end"* ]]
+    do
+        read -t 1 token <&3 || true
+    done
+    info "response from server: ${token}"
+}
+
+close() {
+    if [[ -e /proc/$$/fd/3 ]]; then
+        info "closing connection to server"
+        exec 3<&-
+        exec 3>&-
+        info "connection closed"
+    fi
+}
+
+restore() {
+  server_address="$1"
+  restore_index="$2"
+  re='^[0-9]+$'
+  if ! [[ ${restore_index} =~ $re ]]; then
+    error "restore index needs to be a number: " ${restore_index}
+    exit 1
+  fi
+
+  declare -a index=($(find *.stream 2>/dev/null))
+  index_length=${#index[@]}
+
+  if [[ ${restore_index} -gt ${index_length} ]]; then
+    error "restore index needs to be valid (up to ${index_length}): " ${restore_index}
+    exit 1
+  fi
+
+  if [[ ! -e ${BACKUP_PATH} ]]; then
+    mkdir -p ${BACKUP_PATH}
+  fi
+
+  for restore_stream in ${index[@]:0:${restore_index}}
+  do
+    info "restoring: ${restore_stream}"
+    cat "${restore_stream}" | btrfs receive "${BACKUP_PATH}"
+  done
+}
+
+list() {
+  declare -a index=($(find *.stream 2>/dev/null))
+  index_length=${#index[@]}
+  info "detected ${index_length} backups"
+
+  for backup in "${index[@]}"
+  do
+  info "${backup%.stream}"
+  done
+}
+
+reset() {
+  if [[ ! -e ${BACKUP_PATH} ]]; then
+    error "location does not exist: " ${BACKUP_PATH}
+    exit 1
+  fi
+
+  info "deleting base snapshot"
+  btrfs subvolume delete "${BACKUP_PATH}/${BASE}"
+}
+
+info() {
+  date_time=$(date +%Y-%m-%dT%H:%M:%S:%3N)
+  printf "[${date_time}]: $@\n" | tee >> ${LOG}
+  logEvent "INFO:[${date_time}]: $@"
+}
+
+error() {
+  date_time=$(date +%Y-%m-%dT%H:%M:%S:%3N)
+  printf "\e[1;31m[${date_time}]: $@ \e[0m\n" | tee >> ${LOG}
+  logEvent "ERROR:[${date_time}]: $@"
+}
+
+logEvent() {
+  if [[ -e /proc/$$/fd/3 ]]; then
+    echo "log-event:$@" >&3
+
+    read -t 1 token <&3 || true
+    while [[ ${token} != *"accepted log-event"* ]]
+    do
+        read -t 1 token <&3 || true
+    done
+    printf "response from server: ${token}\n" >> ${LOG}
+  fi
+}
+
+main() {
+  if [[ -e ${LOG} ]]; then
+    rm -f ${LOG}
+  fi
+
+  while [[ $# > 0 ]]
+  do
+  key="$1"
+    case ${key} in
+      -p|--path)
+      BACKUP_PATH="$2"
+      shift 2 # skip this key/value
+      ;;
+      backup)
+      backup "$2"
+      exit 0
+      ;;
+      restore)
+      restore "$2" "$3"
+      exit 0
+      ;;
+      list)
+      list
+      exit 0
+      ;;
+      reset)
+      reset
+      exit 0
+      ;;
+      *) # unknown option
+      error "unknown argument: " ${key}
+      shift # skip this arg
+      ;;
+    esac
+  done
+  exit 0
+}
+
+main "$@"

@@ -1,0 +1,10 @@
+doctype html
+html(ng-app='btrfs-dashboard')
+  head
+    title= title
+    link(rel='stylesheet', href='/stylesheets/style.css')
+    script(src='//ajax.googleapis.com/ajax/libs/angularjs/1.2.25/angular.min.js')
+    script(src='/socket.io/socket.io.js')
+    script(src='javascripts/btrfs-dashboard.js')
+  body
+    block content

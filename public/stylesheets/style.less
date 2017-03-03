@@ -1,0 +1,103 @@
+h1 {
+  margin-bottom: -20px;
+}
+
+body {
+  text-align: center;
+  margin-left: auto;
+  margin-right: auto;
+  padding: 80px;
+  font: 11px "Lucida Grande", Helvetica, Arial, sans-serif;
+  color: #c7ccd4;
+  background-color: #262626;
+}
+
+li {
+  text-align: left;
+}
+
+a {
+  color: #00B7FF;
+}
+
+input {
+  font-family: inherit;
+  line-height: inherit;
+  box-shadow: 0 0 6px rgba(255, 255, 255, 0.2);
+}
+
+button {
+  font-family: inherit;
+  line-height: inherit;
+  box-shadow: 0 0 6px rgba(255, 255, 255, 0.2);
+}
+
+.form-horizontal {
+  margin-left: 30px;
+  padding: 50px;
+  line-height: 12px;
+}
+
+.streamBlock {
+  margin-left: auto;
+  margin-right: auto;
+  width: 55em
+}
+
+[tooltip]:before {
+  position: sticky;
+  padding-right: 10px;
+  content : attr(tooltip);
+  opacity : 0;
+}
+
+[tooltip]:hover:before {
+  opacity : 1;
+}
+
+.streamProgress {
+  position: absolute;
+  bottom: 10px;
+  height: 200px;
+  width: 90%;
+  text-align: left;
+}
+
+// Status animation beyond this point
+.Status-animation {
+  position: relative;
+}
+
+.Status-animation.circular {
+  position: relative;
+  animation: loadingRotate 3s linear infinite;
+}
+
+.Status-animation .path {
+  animation: dash 2.5s ease-in-out infinite, color 6s ease-in-out infinite;
+}
+
+@keyframes color {
+  0%, 100% { stroke: #262626; }
+}
+
+@keyframes loadingRotate {
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes dash {
+  0% {
+    stroke-dasharray: 1, 200;
+    stroke-dashoffset: 0;
+  }
+  50% {
+    stroke-dasharray: 89, 200;
+    stroke-dashoffset: -35;
+  }
+  100% {
+    stroke-dasharray: 89, 200;
+    stroke-dashoffset: -124;
+  }
+}

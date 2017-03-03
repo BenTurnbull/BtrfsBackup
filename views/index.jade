@@ -1,0 +1,21 @@
+extends layout
+
+block content
+    h1= title
+    div(ng-controller='BackupsController')
+        form(ng-submit='submit()' novalidate class='form-horizontal')
+            input(type='text' placeholder='user@host' ng-model='machine.address')
+            input(type='password' placeholder='password' ng-model='machine.password')
+            button(class='btn')='backup'
+            div(class='Status-animation')
+                svg(class='circular')
+                    circle(class="path" cx="150" cy="100" r="20" fill="none" stroke-width="3.5" stroke-miterlimit="1")
+    br
+    div(class='streamBlock')
+        ul(ng-controller='StreamsController')
+            li(ng-repeat='stream in streams').
+                {{stream.date}} &nbsp; sha1 : {{stream.hash}} &nbsp; <span style="float:right;" tooltip="{{stream.duration}} ms"> size : {{stream.size}} &nbsp; #[a(href='api/streams/{{stream.date}}') &#11015;] &nbsp; #[a(href='' ng-click="rollup(stream.date)") &#8634;]
+    br
+    div(class='streamProgress' ng-controller='ProgressController' style='overflow: auto')
+        div(ng-repeat='line in progress track by $index').
+            {{line}} <br>
