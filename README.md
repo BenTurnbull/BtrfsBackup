@@ -9,4 +9,4 @@ go to http://localhost:3000
 
 ## Demo
 
-[[https://github.com/BenTurnbull/btrfsBackup/blob/master/btrfs_server_demo.gif|alt=demo]]
+![alt tag](btrfs_server_demo.gif)
